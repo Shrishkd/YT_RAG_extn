@@ -1,6 +1,7 @@
 const DEFAULT_API_URL = "http://127.0.0.1:8000";
 
 let currentVideoId = null;
+let currentTranscript = null;
 let apiUrl = DEFAULT_API_URL;
 let isBusy = false;
 
@@ -106,10 +107,14 @@ async function fetchVideoStatus(videoId) {
     return apiRequest(`/video/${videoId}/status`);
 }
 
-async function registerVideo(videoId) {
+async function registerVideo(videoId, transcript) {
     return apiRequest("/video/register", {
         method: "POST",
-        body: JSON.stringify({ video_id: videoId }),
+        body: JSON.stringify({
+            video_id: videoId,
+            language: transcript.language,
+            segments: transcript.segments,
+        }),
     });
 }
 
@@ -155,29 +160,37 @@ function setInputEnabled(enabled) {
 }
 
 async function prepareVideo(videoId) {
-    setVideoStatus("Checking transcript...", "loading");
+    setVideoStatus("Fetching transcript from YouTube...", "loading");
 
-    const status = await fetchVideoStatus(videoId);
-
-    if (!status.transcript?.available) {
+    try {
+        currentTranscript = await fetchYouTubeTranscript(videoId);
+    } catch (error) {
         setVideoStatus(
-            status.transcript?.error || "No transcript for this video",
+            error.message || "No transcript for this video",
             "error"
         );
         elements.suggestions.hidden = true;
         return false;
     }
 
+    const status = await fetchVideoStatus(videoId);
+
     if (status.indexed) {
-        setVideoStatus("Ready — transcript indexed", "ready");
+        setVideoStatus(
+            `Ready — ${currentTranscript.languageName || currentTranscript.language}`,
+            "ready"
+        );
         elements.suggestions.hidden = false;
         return true;
     }
 
-    setVideoStatus("Indexing transcript (first question may take longer)...", "loading");
+    setVideoStatus("Indexing transcript on backend...", "loading");
 
-    await registerVideo(videoId);
-    setVideoStatus("Ready — transcript indexed", "ready");
+    await registerVideo(videoId, currentTranscript);
+    setVideoStatus(
+        `Ready — ${currentTranscript.languageName || currentTranscript.language}`,
+        "ready"
+    );
     elements.suggestions.hidden = false;
     return true;
 }
@@ -207,6 +220,7 @@ async function detectVideo() {
         }
 
         currentVideoId = videoId;
+        currentTranscript = null;
         setVideoStatus(`Video detected: ${videoId}`, "loading");
 
         const healthy = await checkBackendHealth();

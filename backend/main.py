@@ -14,7 +14,7 @@ from rag import (
 
 app = FastAPI(
     title="YouTube RAG API",
-    version="1.1.0",
+    version="1.2.0",
 )
 
 allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "*")
@@ -37,8 +37,16 @@ app.add_middleware(
 )
 
 
+class TranscriptSegment(BaseModel):
+    text: str = Field(..., min_length=1)
+    start: float = 0
+    duration: float = 0
+
+
 class VideoRequest(BaseModel):
     video_id: str = Field(..., min_length=6, max_length=20)
+    language: str | None = None
+    segments: list[TranscriptSegment] | None = None
 
 
 class ChatRequest(BaseModel):
@@ -51,18 +59,22 @@ def health_check():
     return {
         "status": "running",
         "message": "YouTube RAG API is working",
-        "version": "1.1.0",
+        "version": "1.2.0",
+        "transcript_mode": "client_or_server",
     }
 
 
 @app.get("/video/{video_id}/status")
-def video_status(video_id: str):
-    transcript = check_transcript_available(video_id)
-    return {
+def video_status(video_id: str, check_youtube: bool = False):
+    result = {
         "video_id": video_id,
         "indexed": video_exists(video_id),
-        "transcript": transcript,
     }
+
+    if check_youtube:
+        result["transcript"] = check_transcript_available(video_id)
+
+    return result
 
 
 @app.post("/video/register")
@@ -70,24 +82,43 @@ def register_video(request: VideoRequest):
     try:
         video_id = request.video_id
 
-        transcript = check_transcript_available(video_id)
-        if not transcript.get("available"):
-            raise HTTPException(
-                status_code=404,
-                detail=transcript.get(
-                    "error",
-                    "No transcript available for this video.",
-                ),
-            )
-
         if video_exists(video_id):
             return {
                 "status": "already_indexed",
                 "video_id": video_id,
             }
 
-        print(f"Indexing video: {video_id}")
-        index_video(video_id)
+        if request.segments:
+            transcript_data = [
+                {
+                    "text": segment.text,
+                    "start": segment.start,
+                    "duration": segment.duration,
+                }
+                for segment in request.segments
+            ]
+
+            print(
+                f"Indexing video from client transcript: {video_id}"
+            )
+            index_video(
+                video_id,
+                transcript_data=transcript_data,
+                language=request.language,
+            )
+        else:
+            transcript = check_transcript_available(video_id)
+            if not transcript.get("available"):
+                raise HTTPException(
+                    status_code=404,
+                    detail=transcript.get(
+                        "error",
+                        "No transcript available for this video.",
+                    ),
+                )
+
+            print(f"Indexing video from server transcript: {video_id}")
+            index_video(video_id)
 
         return {
             "status": "indexed",
@@ -103,13 +134,13 @@ def register_video(request: VideoRequest):
 @app.post("/chat")
 def chat(request: ChatRequest):
     try:
-        transcript = check_transcript_available(request.video_id)
-        if not transcript.get("available"):
+        if not video_exists(request.video_id):
             raise HTTPException(
                 status_code=404,
-                detail=transcript.get(
-                    "error",
-                    "No transcript available for this video.",
+                detail=(
+                    "Video is not indexed yet. "
+                    "Open the video in the extension and wait "
+                    "for indexing to finish."
                 ),
             )
 

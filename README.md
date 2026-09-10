@@ -137,9 +137,28 @@ Example — add your custom domain:
 ## Notes
 
 - Works for any video where YouTube provides a transcript (manual or auto-generated).
+- **Transcripts are fetched in your browser** (extension), not on the cloud server. This avoids YouTube blocking Render/AWS IPs.
+- The backend only receives the transcript text and runs embeddings + RAG.
 - First question on a new video triggers indexing; later questions are faster.
 - Free-tier cloud hosts may sleep after inactivity — first request can take ~30s to wake up.
 - Keep your API key secret. Never commit `.env` to git.
+
+### YouTube IP blocking (cloud servers)
+
+YouTube blocks transcript requests from most cloud provider IPs (Render, AWS, etc.). This project avoids that by fetching transcripts **client-side in the Chrome extension** using your home IP.
+
+If you need server-side transcript fetching, configure a residential proxy in `backend/.env`:
+
+```
+WEBSHARE_PROXY_USERNAME=your_username
+WEBSHARE_PROXY_PASSWORD=your_password
+```
+
+Or:
+
+```
+YOUTUBE_PROXY_URL=http://user:pass@proxy-host:port
+```
 
 ## Troubleshooting
 

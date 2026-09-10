@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "YouTube RAG Assistant",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "description": "Ask questions about any YouTube video using its transcript.",
     "permissions": [
         "sidePanel",

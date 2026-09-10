@@ -10,6 +10,10 @@ from youtube_transcript_api._errors import (
     TranscriptsDisabled,
     VideoUnavailable,
 )
+from youtube_transcript_api.proxies import (
+    GenericProxyConfig,
+    WebshareProxyConfig,
+)
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
@@ -93,11 +97,36 @@ Answer:
 )
 
 
+def create_transcript_api() -> YouTubeTranscriptApi:
+    """Create a transcript API client, optionally routed through a proxy."""
+    webshare_user = os.getenv("WEBSHARE_PROXY_USERNAME")
+    webshare_pass = os.getenv("WEBSHARE_PROXY_PASSWORD")
+    proxy_url = os.getenv("YOUTUBE_PROXY_URL")
+
+    if webshare_user and webshare_pass:
+        return YouTubeTranscriptApi(
+            proxy_config=WebshareProxyConfig(
+                proxy_username=webshare_user,
+                proxy_password=webshare_pass,
+            )
+        )
+
+    if proxy_url:
+        return YouTubeTranscriptApi(
+            proxy_config=GenericProxyConfig(
+                http_url=proxy_url,
+                https_url=proxy_url,
+            )
+        )
+
+    return YouTubeTranscriptApi()
+
+
 def get_transcript(video_id: str) -> tuple[list[dict], str]:
     """Fetch transcript with language priority and automatic fallback."""
     print(f"Fetching transcript for: {video_id}")
 
-    api = YouTubeTranscriptApi()
+    api = create_transcript_api()
     transcript_list = api.list(video_id)
 
     try:
@@ -124,9 +153,11 @@ def get_transcript(video_id: str) -> tuple[list[dict], str]:
     return transcript_data, language
 
 
-def create_chunks(video_id: str):
-    transcript_data, language = get_transcript(video_id)
-
+def create_chunks_from_data(
+    video_id: str,
+    transcript_data: list[dict],
+    language: str,
+):
     transcript = " ".join(
         item["text"] for item in transcript_data
     )
@@ -150,12 +181,32 @@ def create_chunks(video_id: str):
     return chunks
 
 
-def index_video(video_id: str):
+def create_chunks(video_id: str):
+    transcript_data, language = get_transcript(video_id)
+    return create_chunks_from_data(
+        video_id,
+        transcript_data,
+        language,
+    )
+
+
+def index_video(
+    video_id: str,
+    transcript_data: list[dict] | None = None,
+    language: str | None = None,
+):
     print("=" * 60)
     print(f"INDEXING VIDEO: {video_id}")
     print("=" * 60)
 
-    chunks = create_chunks(video_id)
+    if transcript_data is not None:
+        chunks = create_chunks_from_data(
+            video_id,
+            transcript_data,
+            language or "unknown",
+        )
+    else:
+        chunks = create_chunks(video_id)
 
     batch_size = 10
     sleep_time = 5
@@ -211,7 +262,7 @@ def load_vector_store(video_id: str):
 def check_transcript_available(video_id: str) -> dict:
     """Check whether a video has transcripts without indexing."""
     try:
-        api = YouTubeTranscriptApi()
+        api = create_transcript_api()
         transcript_list = api.list(video_id)
         available = [
             {
@@ -251,12 +302,10 @@ def answer_question(video_id: str, question: str) -> dict:
     vector_store = load_vector_store(video_id)
 
     if vector_store is None:
-        print("Video not indexed. Starting indexing...")
-        index_video(video_id)
-        vector_store = load_vector_store(video_id)
-
-    if vector_store is None:
-        raise Exception("Failed to index video.")
+        raise Exception(
+            "Video is not indexed yet. "
+            "Open the video in the extension and wait for indexing."
+        )
 
     retriever = vector_store.as_retriever(
         search_type="similarity",
