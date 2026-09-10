@@ -4,7 +4,7 @@ WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-ENV VECTORSTORE_DIR=/data/vectorstores
+ENV VECTORSTORE_DIR=vectorstores
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN mkdir -p /data/vectorstores
+RUN mkdir -p vectorstores
 
 EXPOSE 8000
 

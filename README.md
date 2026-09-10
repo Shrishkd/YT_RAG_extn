@@ -86,7 +86,7 @@ Default API URL is `http://127.0.0.1:8000`. Change it in **Settings (⚙)** afte
 4. Set `GOOGLE_API_KEY` when prompted
 5. Deploy
 
-Render mounts a persistent disk at `/data` so indexed videos survive restarts.
+On Render's **free tier**, vector stores are ephemeral — indexed videos are rebuilt on the first question after each deploy or restart. Upgrade to a paid plan and add a persistent disk if you need indexes to survive restarts.
 
 ### Option B: Manual Docker deploy
 
