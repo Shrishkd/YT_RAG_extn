@@ -5,50 +5,59 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from youtube_transcript_api import YouTubeTranscriptApi
-from youtube_transcript_api._errors import TranscriptsDisabled
+from youtube_transcript_api._errors import (
+    NoTranscriptFound,
+    TranscriptsDisabled,
+    VideoUnavailable,
+)
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 
 from langchain_google_genai import (
     ChatGoogleGenerativeAI,
-    GoogleGenerativeAIEmbeddings
+    GoogleGenerativeAIEmbeddings,
 )
 
 from langchain_core.prompts import PromptTemplate
 
 
-# ============================================================
-# ENVIRONMENT
-# ============================================================
-
 load_dotenv()
 
-if not os.getenv("GOOGLE_API_KEY"):
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+GEMINI_EMBEDDING_MODEL = os.getenv(
+    "GEMINI_EMBEDDING_MODEL",
+    "models/gemini-embedding-001",
+)
+
+if not GOOGLE_API_KEY:
     raise ValueError(
-        "GOOGLE_API_KEY not found. "
-        "Put it inside backend/.env"
+        "GOOGLE_API_KEY not found. Add it to backend/.env"
     )
 
+PREFERRED_LANGUAGES = [
+    lang.strip()
+    for lang in os.getenv(
+        "PREFERRED_LANGUAGES",
+        "en,en-US,en-GB,hi,es,fr,de,ja,pt,ko",
+    ).split(",")
+    if lang.strip()
+]
 
-# ============================================================
-# MODELS
-# ============================================================
+VECTORSTORE_DIR = Path(
+    os.getenv("VECTORSTORE_DIR", "vectorstores")
+)
+VECTORSTORE_DIR.mkdir(exist_ok=True)
 
 embeddings = GoogleGenerativeAIEmbeddings(
-    model="models/gemini-embedding-001"
+    model=GEMINI_EMBEDDING_MODEL,
 )
-
 
 llm = ChatGoogleGenerativeAI(
-    model="gemini-3.6-flash",
-    temperature=0
+    model=GEMINI_MODEL,
+    temperature=0,
 )
-
-
-# ============================================================
-# PROMPT
-# ============================================================
 
 prompt = PromptTemplate(
     template="""
@@ -80,401 +89,205 @@ Question:
 
 Answer:
 """,
-    input_variables=[
-        "context",
-        "question"
-    ]
+    input_variables=["context", "question"],
 )
 
 
-# ============================================================
-# VECTOR STORE DIRECTORY
-# ============================================================
+def get_transcript(video_id: str) -> tuple[list[dict], str]:
+    """Fetch transcript with language priority and automatic fallback."""
+    print(f"Fetching transcript for: {video_id}")
 
-VECTORSTORE_DIR = Path("vectorstores")
-
-VECTORSTORE_DIR.mkdir(
-    exist_ok=True
-)
-
-
-# ============================================================
-# GET YOUTUBE TRANSCRIPT
-# ============================================================
-
-def get_transcript(video_id):
+    api = YouTubeTranscriptApi()
+    transcript_list = api.list(video_id)
 
     try:
-
-        print(
-            f"Fetching transcript for: {video_id}"
+        transcript = transcript_list.find_transcript(
+            PREFERRED_LANGUAGES
         )
+    except NoTranscriptFound:
+        available = list(transcript_list)
+        if not available:
+            raise Exception(
+                "No transcripts are available for this video."
+            )
+        transcript = available[0]
 
-        api = YouTubeTranscriptApi()
-
-        transcript_list = api.fetch(
-            video_id,
-            languages=["hi"]
-        )
-
-        transcript_data = (
-            transcript_list.to_raw_data()
-        )
-
-        print(
-            f"Transcript entries: "
-            f"{len(transcript_data)}"
-        )
-
-        return transcript_data
-
-    except TranscriptsDisabled:
-
-        raise Exception(
-            "Transcripts are disabled for this video."
-        )
-
-    except Exception as e:
-
-        raise Exception(
-            f"Could not fetch transcript: {str(e)}"
-        )
-
-
-# ============================================================
-# CREATE CHUNKS
-# ============================================================
-
-def create_chunks(video_id):
-
-    transcript_data = get_transcript(
-        video_id
-    )
-
-    # Same basic approach as your current RAG
-    transcript = " ".join(
-        item["text"]
-        for item in transcript_data
-    )
+    fetched = transcript.fetch()
+    transcript_data = fetched.to_raw_data()
+    language = transcript.language_code
 
     print(
-        f"Transcript characters: "
-        f"{len(transcript)}"
+        f"Transcript language: {language}, "
+        f"entries: {len(transcript_data)}"
     )
+
+    return transcript_data, language
+
+
+def create_chunks(video_id: str):
+    transcript_data, language = get_transcript(video_id)
+
+    transcript = " ".join(
+        item["text"] for item in transcript_data
+    )
+
+    print(f"Transcript characters: {len(transcript)}")
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=500,
-        chunk_overlap=100
+        chunk_overlap=100,
     )
 
-    chunks = splitter.create_documents(
-        [transcript]
-    )
+    chunks = splitter.create_documents([transcript])
 
-    # Add metadata
     for chunk in chunks:
-
         chunk.metadata = {
             "video_id": video_id,
-            "language": "hi"
+            "language": language,
         }
 
-    print(
-        f"Number of chunks: "
-        f"{len(chunks)}"
-    )
-
+    print(f"Number of chunks: {len(chunks)}")
     return chunks
 
 
-# ============================================================
-# INDEX VIDEO
-# ============================================================
-
-def index_video(video_id):
-
+def index_video(video_id: str):
+    print("=" * 60)
+    print(f"INDEXING VIDEO: {video_id}")
     print("=" * 60)
 
-    print(
-        f"INDEXING VIDEO: {video_id}"
-    )
-
-    print("=" * 60)
-
-    chunks = create_chunks(
-        video_id
-    )
+    chunks = create_chunks(video_id)
 
     batch_size = 10
-
     sleep_time = 5
-
     vector_store = None
 
+    for i in range(0, len(chunks), batch_size):
+        batch = chunks[i : i + batch_size]
+        batch_number = (i // batch_size) + 1
+        total_batches = (len(chunks) + batch_size - 1) // batch_size
 
-    for i in range(
-        0,
-        len(chunks),
-        batch_size
-    ):
-
-        batch = chunks[
-            i:i + batch_size
-        ]
-
-        batch_number = (
-            i // batch_size
-        ) + 1
-
-        total_batches = (
-            len(chunks)
-            + batch_size
-            - 1
-        ) // batch_size
-
-
-        print(
-            f"Processing batch "
-            f"{batch_number}/"
-            f"{total_batches}"
-        )
-
+        print(f"Processing batch {batch_number}/{total_batches}")
 
         if vector_store is None:
-
-            vector_store = (
-                FAISS.from_documents(
-                    batch,
-                    embeddings
-                )
+            vector_store = FAISS.from_documents(
+                batch,
+                embeddings,
             )
-
         else:
+            vector_store.add_documents(batch)
 
-            vector_store.add_documents(
-                batch
-            )
+        if i + batch_size < len(chunks):
+            time.sleep(sleep_time)
 
+    save_path = VECTORSTORE_DIR / video_id
+    save_path.mkdir(parents=True, exist_ok=True)
+    vector_store.save_local(str(save_path))
 
-        # Avoid hitting embedding rate limits
-        if (
-            i + batch_size
-            < len(chunks)
-        ):
-
-            time.sleep(
-                sleep_time
-            )
-
-
-    # Save vector store
-
-    save_path = (
-        VECTORSTORE_DIR
-        / video_id
-    )
-
-    save_path.mkdir(
-        parents=True,
-        exist_ok=True
-    )
-
-
-    vector_store.save_local(
-        str(save_path)
-    )
-
-
-    print(
-        f"Vector store saved at:"
-    )
-
-    print(
-        save_path
-    )
-
+    print(f"Vector store saved at: {save_path}")
     print("=" * 60)
 
 
-# ============================================================
-# CHECK VIDEO
-# ============================================================
-
-def video_exists(video_id):
-
-    save_path = (
-        VECTORSTORE_DIR
-        / video_id
-    )
-
+def video_exists(video_id: str) -> bool:
+    save_path = VECTORSTORE_DIR / video_id
     return (
         save_path.exists()
-        and
-        (save_path / "index.faiss").exists()
-        and
-        (save_path / "index.pkl").exists()
+        and (save_path / "index.faiss").exists()
+        and (save_path / "index.pkl").exists()
     )
 
 
-# ============================================================
-# LOAD VECTOR STORE
-# ============================================================
-
-def load_vector_store(video_id):
-
-    save_path = (
-        VECTORSTORE_DIR
-        / video_id
-    )
-
+def load_vector_store(video_id: str):
     if not video_exists(video_id):
-
         return None
 
-
-    vector_store = FAISS.load_local(
+    save_path = VECTORSTORE_DIR / video_id
+    return FAISS.load_local(
         str(save_path),
         embeddings,
-        allow_dangerous_deserialization=True
+        allow_dangerous_deserialization=True,
     )
 
-    return vector_store
+
+def check_transcript_available(video_id: str) -> dict:
+    """Check whether a video has transcripts without indexing."""
+    try:
+        api = YouTubeTranscriptApi()
+        transcript_list = api.list(video_id)
+        available = [
+            {
+                "language": t.language,
+                "language_code": t.language_code,
+                "is_generated": t.is_generated,
+            }
+            for t in transcript_list
+        ]
+        return {
+            "available": len(available) > 0,
+            "transcripts": available,
+        }
+    except TranscriptsDisabled:
+        return {
+            "available": False,
+            "error": "Transcripts are disabled for this video.",
+        }
+    except VideoUnavailable:
+        return {
+            "available": False,
+            "error": "Video is unavailable.",
+        }
+    except Exception as exc:
+        return {
+            "available": False,
+            "error": str(exc),
+        }
 
 
-# ============================================================
-# ANSWER QUESTION
-# ============================================================
-
-def answer_question(
-    video_id,
-    question
-):
-
+def answer_question(video_id: str, question: str) -> dict:
+    print("=" * 60)
+    print(f"VIDEO: {video_id}")
+    print(f"QUESTION: {question}")
     print("=" * 60)
 
-    print(
-        f"VIDEO: {video_id}"
-    )
-
-    print(
-        f"QUESTION: {question}"
-    )
-
-    print("=" * 60)
-
-
-    # --------------------------------------------------------
-    # Load existing vector store
-    # --------------------------------------------------------
-
-    vector_store = (
-        load_vector_store(
-            video_id
-        )
-    )
-
-
-    # --------------------------------------------------------
-    # If video is not indexed, index it
-    # --------------------------------------------------------
+    vector_store = load_vector_store(video_id)
 
     if vector_store is None:
+        print("Video not indexed. Starting indexing...")
+        index_video(video_id)
+        vector_store = load_vector_store(video_id)
 
-        print(
-            "Video not indexed."
-        )
+    if vector_store is None:
+        raise Exception("Failed to index video.")
 
-        print(
-            "Starting indexing..."
-        )
-
-        index_video(
-            video_id
-        )
-
-        vector_store = (
-            load_vector_store(
-                video_id
-            )
-        )
-
-
-    # --------------------------------------------------------
-    # Retriever
-    # --------------------------------------------------------
-
-    retriever = (
-        vector_store.as_retriever(
-            search_type="similarity",
-            search_kwargs={
-                "k": 4
-            }
-        )
+    retriever = vector_store.as_retriever(
+        search_type="similarity",
+        search_kwargs={"k": 4},
     )
 
+    retrieved_docs = retriever.invoke(question)
 
-    # --------------------------------------------------------
-    # Retrieve documents
-    # --------------------------------------------------------
-
-    retrieved_docs = (
-        retriever.invoke(
-            question
-        )
-    )
-
-
-    print(
-        f"Retrieved documents: "
-        f"{len(retrieved_docs)}"
-    )
-
-
-    # --------------------------------------------------------
-    # Create context
-    # --------------------------------------------------------
+    print(f"Retrieved documents: {len(retrieved_docs)}")
 
     context = "\n\n".join(
-        doc.page_content
-        for doc in retrieved_docs
+        doc.page_content for doc in retrieved_docs
     )
-
-
-    # --------------------------------------------------------
-    # Create prompt
-    # --------------------------------------------------------
 
     final_prompt = prompt.invoke(
         {
             "context": context,
-            "question": question
+            "question": question,
         }
     )
 
-
-    # --------------------------------------------------------
-    # Generate answer
-    # --------------------------------------------------------
-
-    response = llm.invoke(
-        final_prompt
-    )
-
-
-    # --------------------------------------------------------
-    # Return result
-    # --------------------------------------------------------
+    response = llm.invoke(final_prompt)
 
     return {
-
         "answer": response.content,
-
+        "video_id": video_id,
         "sources": [
             {
                 "text": doc.page_content,
-                "metadata": doc.metadata
+                "metadata": doc.metadata,
             }
             for doc in retrieved_docs
-        ]
-
+        ],
     }

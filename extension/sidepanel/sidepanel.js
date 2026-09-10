@@ -1,518 +1,323 @@
-// ============================================================
-// CONFIGURATION
-// ============================================================
-
-const API_URL =
-    "http://127.0.0.1:8000";
-
-
-// ============================================================
-// GLOBAL STATE
-// ============================================================
+const DEFAULT_API_URL = "http://127.0.0.1:8000";
 
 let currentVideoId = null;
+let apiUrl = DEFAULT_API_URL;
+let isBusy = false;
 
+const elements = {
+    chatForm: document.getElementById("chat-form"),
+    chatContainer: document.getElementById("chat-container"),
+    questionInput: document.getElementById("question"),
+    sendButton: document.getElementById("send-button"),
+    videoStatus: document.getElementById("video-status"),
+    videoStatusText: document.getElementById("video-status-text"),
+    suggestions: document.getElementById("suggestions"),
+    settingsButton: document.getElementById("settings-button"),
+    settingsDialog: document.getElementById("settings-dialog"),
+    settingsForm: document.getElementById("settings-form"),
+    apiUrlInput: document.getElementById("api-url"),
+    cancelSettings: document.getElementById("cancel-settings"),
+};
 
-// ============================================================
-// GET CURRENT TAB
-// ============================================================
+async function loadSettings() {
+    const stored = await chrome.storage.sync.get(["apiUrl"]);
+    apiUrl = (stored.apiUrl || DEFAULT_API_URL).replace(/\/$/, "");
+    elements.apiUrlInput.value = apiUrl;
+}
+
+async function saveSettings(url) {
+    apiUrl = url.replace(/\/$/, "");
+    await chrome.storage.sync.set({ apiUrl });
+}
+
+function setVideoStatus(text, state = "default") {
+    elements.videoStatus.className = `video-status ${state}`;
+    elements.videoStatusText.textContent = text;
+}
 
 async function getCurrentTab() {
-
-    const tabs =
-        await chrome.tabs.query({
-
-            active: true,
-
-            currentWindow: true
-
-        });
-
-
+    const tabs = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+    });
     return tabs[0];
-
 }
-
-
-// ============================================================
-// EXTRACT YOUTUBE VIDEO ID
-// ============================================================
 
 function getVideoId(url) {
-
     try {
-
-        const parsedUrl =
-            new URL(url);
-
-
-        // Normal YouTube URL
-        //
-        // https://www.youtube.com/watch?v=ABC123
-
-        if (
-            parsedUrl.hostname.includes(
-                "youtube.com"
-            )
-        ) {
-
-            return parsedUrl
-                .searchParams
-                .get("v");
-
-        }
-
-
-        // Short YouTube URL
-        //
-        // https://youtu.be/ABC123
-
-        if (
-            parsedUrl.hostname ===
-            "youtu.be"
-        ) {
-
-            return parsedUrl
-                .pathname
-                .substring(1);
-
-        }
-
-
-        return null;
-
-    }
-
-    catch (error) {
-
-        console.error(
-            "URL parsing error:",
-            error
-        );
-
-        return null;
-
-    }
-
-}
-
-
-// ============================================================
-// DETECT VIDEO
-// ============================================================
-
-async function detectVideo() {
-
-    try {
-
-        const tab =
-            await getCurrentTab();
-
-
-        if (
-            !tab ||
-            !tab.url
-        ) {
-
-            currentVideoId = null;
-
-            updateVideoStatus(
-                "No active tab"
-            );
-
-            return null;
-
-        }
-
-
-        const videoId =
-            getVideoId(
-                tab.url
-            );
-
-
-        if (!videoId) {
-
-            currentVideoId = null;
-
-            updateVideoStatus(
-                "Open a YouTube video"
-            );
-
-            return null;
-
-        }
-
-
-        currentVideoId =
-            videoId;
-
-
-        updateVideoStatus(
-            `Video: ${videoId}`
-        );
-
-
-        console.log(
-            "Current YouTube video:",
-            videoId
-        );
-
-
-        return videoId;
-
-    }
-
-    catch (error) {
-
-        console.error(
-            "Video detection error:",
-            error
-        );
-
-        return null;
-
-    }
-
-}
-
-
-// ============================================================
-// UPDATE VIDEO STATUS
-// ============================================================
-
-function updateVideoStatus(
-    text
-) {
-
-    const status =
-        document.getElementById(
-            "video-status"
-        );
-
-
-    status.textContent =
-        text;
-
-}
-
-
-// ============================================================
-// ASK RAG BACKEND
-// ============================================================
-
-async function askRAG(
-    videoId,
-    question
-) {
-
-    console.log(
-        "Sending to backend:",
-        {
-            videoId,
-            question
-        }
-    );
-
-
-    const response =
-        await fetch(
-
-            `${API_URL}/chat`,
-
-            {
-
-                method: "POST",
-
-                headers: {
-
-                    "Content-Type":
-                        "application/json"
-
-                },
-
-                body: JSON.stringify({
-
-                    video_id:
-                        videoId,
-
-                    question:
-                        question
-
-                })
-
+        const parsedUrl = new URL(url);
+
+        if (parsedUrl.hostname.includes("youtube.com")) {
+            if (parsedUrl.pathname.startsWith("/shorts/")) {
+                return parsedUrl.pathname.split("/")[2] || null;
             }
+            return parsedUrl.searchParams.get("v");
+        }
 
-        );
+        if (parsedUrl.hostname === "youtu.be") {
+            return parsedUrl.pathname.substring(1) || null;
+        }
 
+        return null;
+    } catch {
+        return null;
+    }
+}
+
+async function apiRequest(path, options = {}) {
+    const response = await fetch(`${apiUrl}${path}`, {
+        ...options,
+        headers: {
+            "Content-Type": "application/json",
+            ...(options.headers || {}),
+        },
+    });
+
+    let payload = null;
+    const contentType = response.headers.get("content-type") || "";
+
+    if (contentType.includes("application/json")) {
+        payload = await response.json();
+    } else {
+        payload = { detail: await response.text() };
+    }
 
     if (!response.ok) {
-
-        const errorText =
-            await response.text();
-
-
-        throw new Error(
-            errorText
-        );
-
+        const detail =
+            typeof payload.detail === "string"
+                ? payload.detail
+                : JSON.stringify(payload.detail || payload);
+        throw new Error(detail || `Request failed (${response.status})`);
     }
 
-
-    const result =
-        await response.json();
-
-
-    console.log(
-        "Backend response:",
-        result
-    );
-
-
-    return result;
-
+    return payload;
 }
 
+async function checkBackendHealth() {
+    try {
+        await apiRequest("/");
+        return true;
+    } catch {
+        return false;
+    }
+}
 
-// ============================================================
-// ADD MESSAGE
-// ============================================================
+async function fetchVideoStatus(videoId) {
+    return apiRequest(`/video/${videoId}/status`);
+}
 
-function addMessage(
-    text,
-    type
-) {
+async function registerVideo(videoId) {
+    return apiRequest("/video/register", {
+        method: "POST",
+        body: JSON.stringify({ video_id: videoId }),
+    });
+}
 
-    const container =
-        document.getElementById(
-            "chat-container"
-        );
+async function askRAG(videoId, question) {
+    return apiRequest("/chat", {
+        method: "POST",
+        body: JSON.stringify({
+            video_id: videoId,
+            question,
+        }),
+    });
+}
 
+function addMessage(content, type = "ai") {
+    const message = document.createElement("div");
+    message.className = `message ${type}`;
 
-    const message =
-        document.createElement(
-            "div"
-        );
+    if (typeof content === "string") {
+        message.textContent = content;
+    } else {
+        message.appendChild(content);
+    }
 
-
-    message.className =
-        `message ${type}`;
-
-
-    message.textContent =
-        text;
-
-
-    container.appendChild(
-        message
-    );
-
-
-    container.scrollTop =
-        container.scrollHeight;
-
-
-    // IMPORTANT:
-    // Return the HTML element
-    // so we can later update it.
-
+    elements.chatContainer.appendChild(message);
+    elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
     return message;
-
 }
 
-
-// ============================================================
-// CHAT FORM
-// ============================================================
-
-document
-    .getElementById("chat-form")
-    .addEventListener(
-        "submit",
-        async (event) => {
-
-            event.preventDefault();
-
-
-            const input =
-                document.getElementById(
-                    "question"
-                );
-
-
-            const sendButton =
-                document.getElementById(
-                    "send-button"
-                );
-
-
-            const question =
-                input.value.trim();
-
-
-            // ------------------------------------------------
-            // Empty question
-            // ------------------------------------------------
-
-            if (!question) {
-
-                return;
-
-            }
-
-
-            // ------------------------------------------------
-            // Detect current video
-            // ------------------------------------------------
-
-            const videoId =
-                await detectVideo();
-
-
-            if (!videoId) {
-
-                addMessage(
-
-                    "Please open a YouTube video first.",
-
-                    "ai"
-
-                );
-
-                return;
-
-            }
-
-
-            // ------------------------------------------------
-            // Show user message
-            // ------------------------------------------------
-
-            addMessage(
-                question,
-                "user"
-            );
-
-
-            // Clear input
-
-            input.value = "";
-
-
-            // Disable button
-
-            sendButton.disabled =
-                true;
-
-
-            // ------------------------------------------------
-            // Loading message
-            // ------------------------------------------------
-
-            const loadingMessage =
-                addMessage(
-                    "Thinking...",
-                    "ai"
-                );
-
-
-            try {
-
-                // ------------------------------------------------
-                // Call backend
-                // ------------------------------------------------
-
-                const result =
-                    await askRAG(
-                        videoId,
-                        question
-                    );
-
-
-                console.log(
-                    "Answer:",
-                    result.answer
-                );
-
-
-                // ------------------------------------------------
-                // IMPORTANT:
-                //
-                // DO NOT DO:
-                //
-                // loadingMessage.textContent = result;
-                //
-                // That creates:
-                //
-                // [object Object]
-                //
-                // We specifically use:
-                //
-                // result.answer
-                // ------------------------------------------------
-
-                if (
-                    result &&
-                    typeof result.answer ===
-                        "string"
-                ) {
-
-                    loadingMessage.textContent =
-                        result.answer;
-
-                }
-
-                else {
-
-                    loadingMessage.textContent =
-                        "The backend returned an invalid response.";
-
-                }
-
-
-            }
-
-            catch (error) {
-
-                console.error(
-                    "RAG error:",
-                    error
-                );
-
-
-                loadingMessage.textContent =
-                    "❌ Could not connect to the RAG backend.";
-
-            }
-
-
-            finally {
-
-                sendButton.disabled =
-                    false;
-
-                input.focus();
-
-            }
-
+function addLoadingMessage() {
+    const wrapper = document.createElement("div");
+    wrapper.className = "typing-dots";
+    wrapper.innerHTML = "<span></span><span></span><span></span>";
+
+    const message = addMessage(wrapper, "ai loading");
+    message.prepend(document.createTextNode("Thinking "));
+    return message;
+}
+
+function setInputEnabled(enabled) {
+    elements.questionInput.disabled = !enabled;
+    elements.sendButton.disabled = !enabled;
+    isBusy = !enabled;
+}
+
+async function prepareVideo(videoId) {
+    setVideoStatus("Checking transcript...", "loading");
+
+    const status = await fetchVideoStatus(videoId);
+
+    if (!status.transcript?.available) {
+        setVideoStatus(
+            status.transcript?.error || "No transcript for this video",
+            "error"
+        );
+        elements.suggestions.hidden = true;
+        return false;
+    }
+
+    if (status.indexed) {
+        setVideoStatus("Ready — transcript indexed", "ready");
+        elements.suggestions.hidden = false;
+        return true;
+    }
+
+    setVideoStatus("Indexing transcript (first question may take longer)...", "loading");
+
+    await registerVideo(videoId);
+    setVideoStatus("Ready — transcript indexed", "ready");
+    elements.suggestions.hidden = false;
+    return true;
+}
+
+async function detectVideo() {
+    try {
+        const tab = await getCurrentTab();
+
+        if (!tab?.url) {
+            currentVideoId = null;
+            setVideoStatus("No active tab", "warning");
+            elements.suggestions.hidden = true;
+            return null;
         }
-    );
 
+        const videoId = getVideoId(tab.url);
 
-// ============================================================
-// INITIALIZE
-// ============================================================
+        if (!videoId) {
+            currentVideoId = null;
+            setVideoStatus("Open a YouTube video to start", "warning");
+            elements.suggestions.hidden = true;
+            return null;
+        }
+
+        if (videoId === currentVideoId) {
+            return videoId;
+        }
+
+        currentVideoId = videoId;
+        setVideoStatus(`Video detected: ${videoId}`, "loading");
+
+        const healthy = await checkBackendHealth();
+        if (!healthy) {
+            setVideoStatus("Backend unreachable — check Settings", "error");
+            elements.suggestions.hidden = true;
+            return videoId;
+        }
+
+        await prepareVideo(videoId);
+        return videoId;
+    } catch (error) {
+        console.error("Video detection error:", error);
+        setVideoStatus(error.message || "Failed to prepare video", "error");
+        elements.suggestions.hidden = true;
+        return currentVideoId;
+    }
+}
+
+async function handleQuestion(question) {
+    const trimmed = question.trim();
+    if (!trimmed || isBusy) {
+        return;
+    }
+
+    const videoId = await detectVideo();
+    if (!videoId) {
+        addMessage("Please open a YouTube video first.", "ai error");
+        return;
+    }
+
+    addMessage(trimmed, "user");
+    elements.questionInput.value = "";
+    setInputEnabled(false);
+
+    const loadingMessage = addLoadingMessage();
+
+    try {
+        const result = await askRAG(videoId, trimmed);
+
+        if (result?.answer) {
+            loadingMessage.className = "message ai";
+            loadingMessage.textContent = result.answer;
+        } else {
+            loadingMessage.className = "message ai error";
+            loadingMessage.textContent = "The backend returned an invalid response.";
+        }
+    } catch (error) {
+        console.error("RAG error:", error);
+        loadingMessage.className = "message ai error";
+        loadingMessage.textContent = error.message || "Could not reach the RAG backend.";
+    } finally {
+        setInputEnabled(true);
+        elements.questionInput.focus();
+    }
+}
+
+elements.chatForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await handleQuestion(elements.questionInput.value);
+});
+
+document.querySelectorAll(".chip").forEach((chip) => {
+    chip.addEventListener("click", async () => {
+        await handleQuestion(chip.dataset.question || "");
+    });
+});
+
+elements.settingsButton.addEventListener("click", () => {
+    elements.apiUrlInput.value = apiUrl;
+    elements.settingsDialog.showModal();
+});
+
+elements.cancelSettings.addEventListener("click", () => {
+    elements.settingsDialog.close();
+});
+
+elements.settingsForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const nextUrl = elements.apiUrlInput.value.trim();
+    if (!nextUrl) {
+        return;
+    }
+
+    await saveSettings(nextUrl);
+    elements.settingsDialog.close();
+
+    if (currentVideoId) {
+        await prepareVideo(currentVideoId);
+    }
+});
+
+chrome.tabs.onActivated.addListener(() => {
+    detectVideo();
+});
+
+chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
+    if (changeInfo.url) {
+        detectVideo();
+    }
+});
 
 async function initialize() {
+    await loadSettings();
 
-    console.log(
-        "YouTube RAG extension initialized"
-    );
-
+    const healthy = await checkBackendHealth();
+    if (!healthy) {
+        setVideoStatus("Backend offline — set API URL in Settings", "warning");
+    }
 
     await detectVideo();
-
 }
-
 
 initialize();

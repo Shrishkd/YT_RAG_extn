@@ -1,94 +1,73 @@
 <!DOCTYPE html>
-
 <html lang="en">
-
 <head>
-
     <meta charset="UTF-8">
-
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
-
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>YouTube RAG</title>
-
-    <link
-        rel="stylesheet"
-        href="sidepanel.css"
-    >
-
+    <link rel="stylesheet" href="sidepanel.css">
 </head>
-
-
 <body>
-
-    <!-- HEADER -->
-
     <header>
-
-        <div class="title">
-
-            🎥 YouTube RAG
-
+        <div class="header-top">
+            <div class="brand">
+                <span class="brand-icon">▶</span>
+                <span class="brand-text">Video Q&amp;A</span>
+            </div>
+            <button id="settings-button" class="icon-button" title="Settings" aria-label="Settings">⚙</button>
         </div>
-
-
-        <div
-            id="video-status"
-            class="video-status"
-        >
-
-            Detecting video...
-
+        <div id="video-status" class="video-status">
+            <span class="status-dot"></span>
+            <span id="video-status-text">Detecting video...</span>
         </div>
-
     </header>
 
-
-    <!-- CHAT -->
+    <section id="suggestions" class="suggestions" hidden>
+        <p class="suggestions-label">Try asking:</p>
+        <div class="suggestion-chips">
+            <button type="button" class="chip" data-question="What is this video about?">Summary</button>
+            <button type="button" class="chip" data-question="What are the main points discussed?">Main points</button>
+            <button type="button" class="chip" data-question="List the key takeaways.">Key takeaways</button>
+        </div>
+    </section>
 
     <main id="chat-container">
-
-        <div class="message ai">
-
-            👋 Hi!
-
-            <br><br>
-
-            Ask me anything about
-            the YouTube video.
-
+        <div class="message ai welcome">
+            <strong>Ask anything about this video.</strong>
+            <p>I read the transcript and answer from what was actually said — no guessing.</p>
         </div>
-
     </main>
 
-
-    <!-- INPUT -->
-
     <form id="chat-form">
-
         <input
             id="question"
             type="text"
             placeholder="Ask about this video..."
             autocomplete="off"
+            maxlength="2000"
         >
-
-        <button
-            id="send-button"
-            type="submit"
-        >
-
-            ➤
-
-        </button>
-
+        <button id="send-button" type="submit" aria-label="Send">➤</button>
     </form>
 
+    <dialog id="settings-dialog">
+        <form method="dialog" id="settings-form">
+            <h2>Settings</h2>
+            <label for="api-url">Backend API URL</label>
+            <input
+                id="api-url"
+                type="url"
+                placeholder="https://your-api.onrender.com"
+                required
+            >
+            <p class="hint">
+                Local dev: <code>http://127.0.0.1:8000</code>
+            </p>
+            <div class="dialog-actions">
+                <button type="button" id="cancel-settings">Cancel</button>
+                <button type="submit" id="save-settings">Save</button>
+            </div>
+        </form>
+    </dialog>
 
     <script src="sidepanel.js"></script>
-
 </body>
-
 </html>

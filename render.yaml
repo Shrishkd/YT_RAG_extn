@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: youtube-rag-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.6-flash
+      - key: ALLOWED_ORIGINS
+        value: "*"
+      - key: VECTORSTORE_DIR
+        value: /data/vectorstores
+    disk:
+      name: vectorstore-data
+      mountPath: /data
+      sizeGB: 1

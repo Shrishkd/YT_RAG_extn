@@ -1,6 +1,6 @@
 .env
+vectorstores/
 __pycache__/
 *.pyc
-backend/vectorstores/
 .venv/
 venv/

@@ -1,8 +1,8 @@
-fastapi
-uvicorn
-youtube-transcript-api
-langchain-community
-langchain-google-genai
-langchain-text-splitters
-faiss-cpu
-python-dotenv
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+youtube-transcript-api>=1.2.4
+langchain-community>=0.3.0
+langchain-google-genai>=2.0.0
+langchain-text-splitters>=0.3.0
+faiss-cpu>=1.8.0
+python-dotenv>=1.0.0
