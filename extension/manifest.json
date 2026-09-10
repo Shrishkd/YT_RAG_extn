@@ -1,0 +1,31 @@
+{
+    "manifest_version": 3,
+
+    "name": "YouTube RAG Assistant",
+
+    "version": "1.0.0",
+
+    "description": "Ask questions about the YouTube video you are watching.",
+
+    "permissions": [
+        "sidePanel",
+        "tabs"
+    ],
+
+    "host_permissions": [
+        "https://www.youtube.com/*",
+        "http://127.0.0.1:8000/*"
+    ],
+
+    "background": {
+        "service_worker": "background.js"
+    },
+
+    "action": {
+        "default_title": "Open YouTube RAG"
+    },
+
+    "side_panel": {
+        "default_path": "sidepanel/sidepanel.html"
+    }
+}

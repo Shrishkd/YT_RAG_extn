@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>YouTube RAG</title>
+
+    <link
+        rel="stylesheet"
+        href="sidepanel.css"
+    >
+
+</head>
+
+
+<body>
+
+    <!-- HEADER -->
+
+    <header>
+
+        <div class="title">
+
+            🎥 YouTube RAG
+
+        </div>
+
+
+        <div
+            id="video-status"
+            class="video-status"
+        >
+
+            Detecting video...
+
+        </div>
+
+    </header>
+
+
+    <!-- CHAT -->
+
+    <main id="chat-container">
+
+        <div class="message ai">
+
+            👋 Hi!
+
+            <br><br>
+
+            Ask me anything about
+            the YouTube video.
+
+        </div>
+
+    </main>
+
+
+    <!-- INPUT -->
+
+    <form id="chat-form">
+
+        <input
+            id="question"
+            type="text"
+            placeholder="Ask about this video..."
+            autocomplete="off"
+        >
+
+        <button
+            id="send-button"
+            type="submit"
+        >
+
+            ➤
+
+        </button>
+
+    </form>
+
+
+    <script src="sidepanel.js"></script>
+
+</body>
+
+</html>
